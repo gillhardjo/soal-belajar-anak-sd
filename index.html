@@ -4,7 +4,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { 
   BookOpen, Star, Trophy, CheckCircle, XCircle, 
-  Settings, RefreshCcw, Brain, Leaf, Wifi, WifiOff, Globe, AlertCircle
+  Settings, RefreshCcw, Brain, Leaf, Wifi, WifiOff, Globe, AlertCircle, Loader2, Sparkles
 } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
@@ -23,7 +23,11 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- DATA KURIKULUM & GENERATOR SOAL ---
+// --- GEMINI AI CONFIG ---
+// API Key akan disediakan oleh environment runtime secara otomatis
+const apiKey = ""; 
+
+// --- DATA KURIKULUM & GENERATOR LOKAL (FALLBACK) ---
 
 const SUBJECTS = {
   1: ["Matematika", "B. Indonesia", "Pancasila", "B. Inggris"],
@@ -39,7 +43,7 @@ const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) +
 const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const shuffleArray = (array) => array.sort(() => Math.random() - 0.5);
 
-// --- 1. GENERATOR MATEMATIKA ---
+// --- 1. GENERATOR MATEMATIKA (LOKAL) ---
 const generateMathQuestion = (grade) => {
   let q, a;
   const type = getRandomInt(1, grade <= 2 ? 2 : 4); 
@@ -62,7 +66,7 @@ const generateMathQuestion = (grade) => {
   return { question: q, options: shuffleArray(Array.from(opts).map(String)), answer: String(a), type: "Matematika" };
 };
 
-// --- 2. GENERATOR BAHASA INGGRIS (BARU) ---
+// --- 2. GENERATOR BAHASA INGGRIS (LOKAL) ---
 const VOCAB_DATA = {
   colors: [
     { en: "Red", id: "Merah" }, { en: "Blue", id: "Biru" }, { en: "Green", id: "Hijau" }, 
@@ -84,13 +88,12 @@ const VOCAB_DATA = {
 };
 
 const generateEnglishQuestion = (grade) => {
-  // Pilih kategori berdasarkan kelas
   let categories = ['colors', 'animals', 'fruits'];
   if (grade >= 3) categories.push('family');
   
   const cat = getRandomItem(categories);
   const item = getRandomItem(VOCAB_DATA[cat]);
-  const isEnToId = Math.random() > 0.5; // Random arah terjemahan
+  const isEnToId = Math.random() > 0.5; 
 
   let q, a;
   if (isEnToId) {
@@ -101,7 +104,6 @@ const generateEnglishQuestion = (grade) => {
     a = item.en;
   }
 
-  // Generate opsi salah dari kategori yang sama agar mengecoh
   let opts = new Set([a]);
   const pool = VOCAB_DATA[cat];
   while (opts.size < 4) {
@@ -113,7 +115,7 @@ const generateEnglishQuestion = (grade) => {
   return { question: q, options: shuffleArray(Array.from(opts)), answer: a, type: "B. Inggris" };
 };
 
-// --- 3. GENERATOR SAINS / IPAS (BARU) ---
+// --- 3. GENERATOR SAINS / IPAS (LOKAL) ---
 const SCIENCE_DATA = {
   food: [
     { type: "Herbivora", examples: ["Sapi", "Kambing", "Kuda", "Kelinci", "Gajah"] },
@@ -141,23 +143,19 @@ const generateScienceQuestion = (grade) => {
   let q, a, opts;
 
   if (topic === "food" || topic === "physics") {
-    // Pola: "Berikut yang termasuk benda [Kategori] adalah..."
     const data = SCIENCE_DATA[topic];
     const correctCat = getRandomItem(data);
     const correctExample = getRandomItem(correctCat.examples);
     
-    // Pilih pertanyaan secara acak: Tanya kategori atau tanya contoh
     if (Math.random() > 0.5) {
       q = `${correctExample} adalah contoh dari benda/hewan...`;
       a = topic === "food" ? correctCat.type : correctCat.state;
       opts = data.map(d => topic === "food" ? d.type : d.state);
-      // Jika opsi kurang dari 4, tambah dummy
       if (opts.length < 4) opts.push("Tidak ada yang benar");
     } else {
       q = `Berikut ini yang termasuk ${topic === "food" ? correctCat.type : "benda " + correctCat.state} adalah...`;
       a = correctExample;
       opts = [a];
-      // Ambil opsi salah dari kategori lain
       const otherCats = data.filter(d => d !== correctCat);
       while (opts.length < 4) {
         const wrongCat = getRandomItem(otherCats);
@@ -166,7 +164,6 @@ const generateScienceQuestion = (grade) => {
       }
     }
   } else {
-    // Biology (Fungsi Bagian Tubuh)
     const item = getRandomItem(SCIENCE_DATA.biology);
     q = `Fungsi dari ${item.part} pada tumbuhan adalah...`;
     a = item.func;
@@ -176,13 +173,69 @@ const generateScienceQuestion = (grade) => {
   return { question: q, options: shuffleArray(opts), answer: a, type: "Sains (IPAS)" };
 };
 
-// --- BANK SOAL STATIS (FALLBACK) ---
+// --- BANK SOAL STATIS (FALLBACK TERAKHIR) ---
 const STATIC_POOL = [
   { subject: "Pancasila", q: "Dasar negara Indonesia adalah...", a: "Pancasila", o: ["UUD 1945", "Pancasila", "Tap MPR", "Perpres"] },
   { subject: "Pancasila", q: "Sila pertama dilambangkan dengan...", a: "Bintang", o: ["Bintang", "Rantai", "Pohon Beringin", "Padi Kapas"] },
   { subject: "Sejarah", q: "Presiden pertama Indonesia adalah...", a: "Soekarno", o: ["Soeharto", "Habibie", "Soekarno", "Hatta"] },
   { subject: "B. Indonesia", q: "Lawan kata 'Panjang' adalah...", a: "Pendek", o: ["Tinggi", "Luas", "Pendek", "Besar"] }
 ];
+
+// --- FUNGSI AI GENERATOR (GEMINI) ---
+const generateQuestionsWithGemini = async (grade, subject, count) => {
+  const prompt = `Buatkan ${count} soal pilihan ganda untuk siswa SD Kelas ${grade} mata pelajaran ${subject} di Indonesia. 
+  Soal harus variatif, edukatif, dan sesuai Kurikulum Merdeka.
+  Jangan berikan penjelasan tambahan, hanya JSON murni.
+  
+  Format JSON yang WAJIB diikuti:
+  [
+    {
+      "question": "Pertanyaan disini?",
+      "options": ["Pilihan A", "Pilihan B", "Pilihan C", "Pilihan D"],
+      "answer": "Jawaban Benar (harus sama persis dengan salah satu opsi)",
+      "type": "${subject}"
+    }
+  ]
+  `;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          // Mengaktifkan Google Search agar data up-to-date
+          tools: [{ google_search: {} }],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        }),
+      }
+    );
+
+    if (!response.ok) throw new Error("AI Busy");
+    
+    const result = await response.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) throw new Error("No data");
+    
+    // Parsing JSON dari AI
+    let questions = JSON.parse(text);
+    
+    // Validasi sederhana
+    if (!Array.isArray(questions) || questions.length === 0) throw new Error("Invalid Format");
+    
+    return questions;
+
+  } catch (error) {
+    console.error("AI Generation Error:", error);
+    return null; // Return null to trigger fallback
+  }
+};
+
 
 // --- MAIN APP ---
 export default function App() {
@@ -193,10 +246,11 @@ export default function App() {
   const [grade, setGrade] = useState(1);
   const [subject, setSubject] = useState("Matematika");
   const [qCount, setQCount] = useState(10);
-  const [playerName, setPlayerName] = useState("");
   
-  // Notification State (Pengganti Alert)
+  // Notification & Loading
   const [notification, setNotification] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [usedAI, setUsedAI] = useState(false); // Flag untuk tahu apakah pakai AI atau Fallback
   
   // Game State
   const [view, setView] = useState("setup");
@@ -207,11 +261,9 @@ export default function App() {
   const [isCorrect, setIsCorrect] = useState(null);
 
   useEffect(() => {
-    // Auth
     signInAnonymously(auth).catch(console.error);
     onAuthStateChanged(auth, setUser);
 
-    // Online Status Listener
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -227,48 +279,61 @@ export default function App() {
     setSubject(SUBJECTS[grade][0]);
   }, [grade]);
 
-  // Helper Notifikasi
   const showNotification = (msg) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- START QUIZ LOGIC ---
-  const startQuiz = () => {
+  // --- START QUIZ LOGIC (UPDATED WITH AI) ---
+  const startQuiz = async () => {
     if (!isOnline) {
       showNotification("Butuh internet untuk buat soal baru!");
       return;
     }
-    if (!playerName.trim()) {
-      showNotification("Jangan lupa isi namamu dulu ya!");
-      return;
-    }
 
-    const newQuestions = [];
-    for (let i = 0; i < qCount; i++) {
-      let qData;
-      
-      // Pilih Generator berdasarkan Subjek
-      if (subject === "Matematika") {
-        qData = generateMathQuestion(grade);
-      } else if (subject === "B. Inggris") {
-        qData = generateEnglishQuestion(grade);
-      } else if (subject === "Sains (IPAS)") {
-        qData = generateScienceQuestion(grade);
-      } else {
-        // Fallback ke Static Pool untuk mapel lain
-        const filtered = STATIC_POOL.filter(p => p.subject === subject);
-        const rand = filtered.length > 0 ? getRandomItem(filtered) : STATIC_POOL[0];
-        qData = {
-            question: rand.q,
-            answer: rand.a,
-            options: shuffleArray([...rand.o]),
-            type: subject
-        };
+    setIsGenerating(true);
+    setUsedAI(false);
+
+    let newQuestions = null;
+
+    // 1. COBA MENGGUNAKAN AI
+    try {
+      newQuestions = await generateQuestionsWithGemini(grade, subject, qCount);
+      if (newQuestions) {
+        setUsedAI(true);
       }
-      newQuestions.push(qData);
+    } catch (e) {
+      console.log("AI failed, using fallback");
     }
 
+    // 2. FALLBACK KE LOKAL JIKA AI GAGAL / NULL
+    if (!newQuestions) {
+      newQuestions = [];
+      showNotification("AI sibuk, menggunakan Bank Soal Lokal...");
+      
+      for (let i = 0; i < qCount; i++) {
+        let qData;
+        if (subject === "Matematika") {
+          qData = generateMathQuestion(grade);
+        } else if (subject === "B. Inggris") {
+          qData = generateEnglishQuestion(grade);
+        } else if (subject === "Sains (IPAS)") {
+          qData = generateScienceQuestion(grade);
+        } else {
+          const filtered = STATIC_POOL.filter(p => p.subject === subject);
+          const rand = filtered.length > 0 ? getRandomItem(filtered) : STATIC_POOL[0];
+          qData = {
+              question: rand.q,
+              answer: rand.a,
+              options: shuffleArray([...rand.o]),
+              type: subject
+          };
+        }
+        newQuestions.push(qData);
+      }
+    }
+
+    setIsGenerating(false);
     setQuestions(newQuestions);
     setScore(0);
     setCurrentIdx(0);
@@ -303,7 +368,6 @@ export default function App() {
     if (user && isOnline) {
       try {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'history'), {
-          name: playerName,
           grade: grade,
           subject: subject,
           score: finalScore,
@@ -324,80 +388,76 @@ export default function App() {
           <Globe size={32} className="text-yellow-300" />
           <Brain size={32} className="text-white" />
         </div>
-        <h1 className="text-2xl font-bold">Generator Soal SD</h1>
-        <p className="opacity-90 text-sm">Online Learning System</p>
+        <h1 className="text-2xl font-bold">Latihan Soal SD + AI</h1>
+        <p className="opacity-90 text-sm">Powered by Google Gemini</p>
       </div>
 
       <div className="p-6 space-y-6">
         {/* Status Koneksi */}
         <div className={`flex items-center justify-center gap-2 p-2 rounded-lg text-sm font-bold ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
           {isOnline ? <Wifi size={16}/> : <WifiOff size={16}/>}
-          {isOnline ? "Terhubung ke Server Soal" : "Tidak Ada Koneksi Internet"}
+          {isOnline ? "Terhubung ke Server AI" : "Offline (Generator Lokal)"}
         </div>
 
-        <div>
-          <label className="block text-sm font-bold text-gray-700 mb-2">Nama Siswa</label>
-          <input 
-            type="text" 
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            className="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 outline-none"
-            placeholder="Ketik namamu..."
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-gray-700 mb-2">Pilih Kelas</label>
-          <div className="grid grid-cols-6 gap-2">
-            {[1, 2, 3, 4, 5, 6].map((g) => (
-              <button
-                key={g}
-                onClick={() => setGrade(g)}
-                className={`p-2 rounded-lg font-bold transition-all ${grade === g ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
-              >
-                {g}
-              </button>
-            ))}
+        {/* Form Inputs */}
+        <div className={isGenerating ? "opacity-50 pointer-events-none" : ""}>
+          <div className="mb-4">
+            <label className="block text-sm font-bold text-gray-700 mb-2">Pilih Kelas</label>
+            <div className="grid grid-cols-6 gap-2">
+              {[1, 2, 3, 4, 5, 6].map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGrade(g)}
+                  className={`p-2 rounded-lg font-bold transition-all ${grade === g ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div>
-          <label className="block text-sm font-bold text-gray-700 mb-2">Mata Pelajaran</label>
-          <div className="grid grid-cols-2 gap-2">
-            {SUBJECTS[grade].map((sub) => (
-              <button
-                key={sub}
-                onClick={() => setSubject(sub)}
-                className={`p-3 rounded-xl text-xs font-bold border-2 transition-all ${subject === sub ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-gray-100'}`}
-              >
-                {sub}
-              </button>
-            ))}
+          <div className="mb-4">
+            <label className="block text-sm font-bold text-gray-700 mb-2">Mata Pelajaran</label>
+            <div className="grid grid-cols-2 gap-2">
+              {SUBJECTS[grade].map((sub) => (
+                <button
+                  key={sub}
+                  onClick={() => setSubject(sub)}
+                  className={`p-3 rounded-xl text-xs font-bold border-2 transition-all ${subject === sub ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-gray-100'}`}
+                >
+                  {sub}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div>
-          <div className="flex justify-between mb-2">
-            <label className="text-sm font-bold text-gray-700">Jumlah Soal</label>
-            <span className="text-blue-600 font-bold bg-blue-50 px-2 rounded">{qCount}</span>
+          <div className="mb-4">
+            <div className="flex justify-between mb-2">
+              <label className="text-sm font-bold text-gray-700">Jumlah Soal</label>
+              <span className="text-blue-600 font-bold bg-blue-50 px-2 rounded">{qCount}</span>
+            </div>
+            <input 
+              type="range" min="5" max="20" step="5"
+              value={qCount} onChange={(e) => setQCount(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
           </div>
-          <input 
-            type="range" min="5" max="20" step="5"
-            value={qCount} onChange={(e) => setQCount(parseInt(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
-          />
         </div>
 
         <button 
           onClick={startQuiz}
-          disabled={!isOnline}
+          disabled={!isOnline || isGenerating}
           className={`w-full font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg transition-all ${
-            isOnline 
+            isOnline && !isGenerating
             ? 'bg-yellow-400 hover:bg-yellow-500 text-yellow-900 active:scale-95' 
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {isOnline ? <><Settings size={20} /> Generate Soal Baru</> : "Menunggu Koneksi..."}
+          {isGenerating ? (
+            <><Loader2 className="animate-spin" /> Sedang Membuat Soal...</>
+          ) : (
+            <><Sparkles size={20} /> Generate Soal AI</>
+          )}
         </button>
       </div>
     </div>
@@ -408,8 +468,9 @@ export default function App() {
     return (
       <div className="max-w-xl w-full">
         <div className="flex justify-between items-center mb-6 text-white">
-          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold text-sm">
+          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2">
             {subject} • Kelas {grade}
+            {usedAI && <Sparkles size={14} className="text-yellow-300" />}
           </div>
           <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold flex items-center gap-2">
             <Star size={18} className="text-yellow-300 fill-current" /> {score}
@@ -420,7 +481,7 @@ export default function App() {
           <span className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">
             Soal {currentIdx + 1} / {questions.length}
           </span>
-          <h2 className="text-2xl md:text-3xl font-bold text-gray-800 mb-8 leading-snug">
+          <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-8 leading-snug">
             {q.question}
           </h2>
           <div className="grid grid-cols-1 gap-3">
@@ -445,6 +506,11 @@ export default function App() {
             })}
           </div>
         </div>
+        {usedAI && (
+          <div className="text-center mt-4 text-white/70 text-sm flex justify-center items-center gap-1">
+            <Sparkles size={14} /> Soal ini dibuat oleh AI
+          </div>
+        )}
       </div>
     );
   };

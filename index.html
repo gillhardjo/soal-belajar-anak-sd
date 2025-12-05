@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
+// Pastikan konfigurasi ini sesuai dengan project Firebase kamu
 const firebaseConfig = {
   apiKey: "AIzaSyAdfK9CAYMyjLsXmYHJJvNdIZb0gKaOosQ",
   authDomain: "soal-belajar-anak-sd.firebaseapp.com",
@@ -18,17 +19,16 @@ const firebaseConfig = {
   measurementId: "G-0SDCDR5B5H"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- GEMINI AI CONFIG ---
-// API Key akan disediakan oleh environment runtime secara otomatis
-const apiKey = ""; 
+const apiKey = ""; // API Key akan diisi otomatis oleh sistem saat runtime
 
 // --- DATA KURIKULUM & GENERATOR LOKAL (FALLBACK) ---
-
 const SUBJECTS = {
   1: ["Matematika", "B. Indonesia", "Pancasila", "B. Inggris"],
   2: ["Matematika", "B. Indonesia", "Pancasila", "B. Inggris"],
@@ -46,17 +46,30 @@ const shuffleArray = (array) => array.sort(() => Math.random() - 0.5);
 // --- 1. GENERATOR MATEMATIKA (LOKAL) ---
 const generateMathQuestion = (grade) => {
   let q, a;
-  const type = getRandomInt(1, grade <= 2 ? 2 : 4); 
+  const type = getRandomInt(1, grade <= 2 ? 2 : 4); // 1:+, 2:-, 3:x, 4:/
 
   let num1, num2;
+  // Tingkat kesulitan berdasarkan kelas
   if (grade <= 2) { num1 = getRandomInt(1, 20); num2 = getRandomInt(1, 20); }
   else if (grade <= 4) { num1 = getRandomInt(10, 100); num2 = getRandomInt(5, 50); }
   else { num1 = getRandomInt(50, 500); num2 = getRandomInt(10, 100); }
 
-  if (type === 1) { q = `${num1} + ${num2} = ...`; a = num1 + num2; }
-  else if (type === 2) { if (num1 < num2) [num1, num2] = [num2, num1]; q = `${num1} - ${num2} = ...`; a = num1 - num2; }
-  else if (type === 3) { num1 = getRandomInt(2, 12); num2 = getRandomInt(2, 12); q = `${num1} x ${num2} = ...`; a = num1 * num2; }
-  else { num2 = getRandomInt(2, 10); a = getRandomInt(2, 12); num1 = num2 * a; q = `${num1} : ${num2} = ...`; }
+  if (type === 1) { 
+    q = `${num1} + ${num2} = ...`; 
+    a = num1 + num2; 
+  } else if (type === 2) { 
+    if (num1 < num2) [num1, num2] = [num2, num1]; // Agar tidak negatif
+    q = `${num1} - ${num2} = ...`; 
+    a = num1 - num2; 
+  } else if (type === 3) { 
+    num1 = getRandomInt(2, 12); num2 = getRandomInt(2, 12); 
+    q = `${num1} x ${num2} = ...`; 
+    a = num1 * num2; 
+  } else { 
+    num2 = getRandomInt(2, 10); a = getRandomInt(2, 12); 
+    num1 = num2 * a; 
+    q = `${num1} : ${num2} = ...`; 
+  }
 
   let opts = new Set([a]);
   while (opts.size < 4) {
@@ -147,6 +160,7 @@ const generateScienceQuestion = (grade) => {
     const correctCat = getRandomItem(data);
     const correctExample = getRandomItem(correctCat.examples);
     
+    // Variasi soal: Tanya Kategori atau Tanya Contoh
     if (Math.random() > 0.5) {
       q = `${correctExample} adalah contoh dari benda/hewan...`;
       a = topic === "food" ? correctCat.type : correctCat.state;
@@ -185,13 +199,11 @@ const STATIC_POOL = [
 const generateQuestionsWithGemini = async (grade, subject, count) => {
   const prompt = `Buatkan ${count} soal pilihan ganda untuk siswa SD Kelas ${grade} mata pelajaran ${subject} di Indonesia. 
   Soal harus variatif, edukatif, dan sesuai Kurikulum Merdeka.
-  Jangan berikan penjelasan tambahan, hanya JSON murni.
-  
-  Format JSON yang WAJIB diikuti:
+  Output WAJIB hanya JSON murni tanpa markdown, format:
   [
     {
-      "question": "Pertanyaan disini?",
-      "options": ["Pilihan A", "Pilihan B", "Pilihan C", "Pilihan D"],
+      "question": "Pertanyaan?",
+      "options": ["A", "B", "C", "D"],
       "answer": "Jawaban Benar (harus sama persis dengan salah satu opsi)",
       "type": "${subject}"
     }
@@ -206,11 +218,8 @@ const generateQuestionsWithGemini = async (grade, subject, count) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          // Mengaktifkan Google Search agar data up-to-date
-          tools: [{ google_search: {} }],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
+          tools: [{ google_search: {} }], // Menggunakan Google Search agar soal akurat
+          generationConfig: { responseMimeType: "application/json" }
         }),
       }
     );
@@ -222,46 +231,43 @@ const generateQuestionsWithGemini = async (grade, subject, count) => {
     
     if (!text) throw new Error("No data");
     
-    // Parsing JSON dari AI
     let questions = JSON.parse(text);
-    
-    // Validasi sederhana
     if (!Array.isArray(questions) || questions.length === 0) throw new Error("Invalid Format");
     
     return questions;
 
   } catch (error) {
     console.error("AI Generation Error:", error);
-    return null; // Return null to trigger fallback
+    return null; // Return null agar sistem beralih ke fallback lokal
   }
 };
 
-
-// --- MAIN APP ---
+// --- MAIN APP COMPONENT ---
 export default function App() {
   const [user, setUser] = useState(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  // Setup State
+  // Quiz Configuration State
   const [grade, setGrade] = useState(1);
   const [subject, setSubject] = useState("Matematika");
   const [qCount, setQCount] = useState(10);
   
-  // Notification & Loading
+  // UI State
   const [notification, setNotification] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [usedAI, setUsedAI] = useState(false); // Flag untuk tahu apakah pakai AI atau Fallback
+  const [usedAI, setUsedAI] = useState(false);
   
-  // Game State
-  const [view, setView] = useState("setup");
+  // Gameplay State
+  const [view, setView] = useState("setup"); // setup, playing, result
   const [questions, setQuestions] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [selectedOpt, setSelectedOpt] = useState(null);
   const [isCorrect, setIsCorrect] = useState(null);
 
+  // Init Auth & Online Listener
   useEffect(() => {
-    signInAnonymously(auth).catch(console.error);
+    signInAnonymously(auth).catch((err) => console.error("Auth Failed", err));
     onAuthStateChanged(auth, setUser);
 
     const handleOnline = () => setIsOnline(true);
@@ -275,41 +281,42 @@ export default function App() {
     };
   }, []);
 
+  // Update default subject when grade changes
   useEffect(() => {
     setSubject(SUBJECTS[grade][0]);
   }, [grade]);
 
+  // Helper: Show Toast Notification
   const showNotification = (msg) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- START QUIZ LOGIC (UPDATED WITH AI) ---
+  // --- LOGIC: MEMULAI KUIS ---
   const startQuiz = async () => {
-    if (!isOnline) {
-      showNotification("Butuh internet untuk buat soal baru!");
-      return;
+    if (!isOnline && subject !== "Matematika" && subject !== "B. Inggris" && subject !== "Sains (IPAS)") {
+        // Jika offline dan mapelnya tidak punya generator lokal, peringatkan
+        showNotification("Mapel ini butuh internet untuk ambil soal baru!");
     }
 
     setIsGenerating(true);
     setUsedAI(false);
-
     let newQuestions = null;
 
-    // 1. COBA MENGGUNAKAN AI
-    try {
-      newQuestions = await generateQuestionsWithGemini(grade, subject, qCount);
-      if (newQuestions) {
-        setUsedAI(true);
+    // 1. Prioritas Utama: Coba Pakai AI (Hanya jika Online)
+    if (isOnline) {
+      try {
+        newQuestions = await generateQuestionsWithGemini(grade, subject, qCount);
+        if (newQuestions) setUsedAI(true);
+      } catch (e) {
+        console.log("AI failed, switching to local.");
       }
-    } catch (e) {
-      console.log("AI failed, using fallback");
     }
 
-    // 2. FALLBACK KE LOKAL JIKA AI GAGAL / NULL
+    // 2. Fallback: Gunakan Generator Lokal jika AI gagal/offline
     if (!newQuestions) {
+      if (isOnline) showNotification("AI sibuk, menggunakan Bank Soal Lokal...");
       newQuestions = [];
-      showNotification("AI sibuk, menggunakan Bank Soal Lokal...");
       
       for (let i = 0; i < qCount; i++) {
         let qData;
@@ -320,6 +327,7 @@ export default function App() {
         } else if (subject === "Sains (IPAS)") {
           qData = generateScienceQuestion(grade);
         } else {
+          // Fallback terakhir: Ambil dari pool statis
           const filtered = STATIC_POOL.filter(p => p.subject === subject);
           const rand = filtered.length > 0 ? getRandomItem(filtered) : STATIC_POOL[0];
           qData = {
@@ -333,17 +341,19 @@ export default function App() {
       }
     }
 
-    setIsGenerating(false);
+    // Setup Game
     setQuestions(newQuestions);
     setScore(0);
     setCurrentIdx(0);
+    setIsGenerating(false);
     setView("playing");
     setSelectedOpt(null);
     setIsCorrect(null);
   };
 
+  // --- LOGIC: MENJAWAB SOAL ---
   const handleAnswer = (opt) => {
-    if (selectedOpt) return;
+    if (selectedOpt) return; // Mencegah double click
 
     const currentQ = questions[currentIdx];
     const correct = opt === currentQ.answer;
@@ -352,6 +362,7 @@ export default function App() {
     setIsCorrect(correct);
     if (correct) setScore(s => s + 1);
 
+    // Delay sebelum soal berikutnya
     setTimeout(() => {
       if (currentIdx < questions.length - 1) {
         setCurrentIdx(c => c + 1);
@@ -363,6 +374,7 @@ export default function App() {
     }, 1500);
   };
 
+  // --- LOGIC: SELESAI ---
   const finishQuiz = async (finalScore) => {
     setView("result");
     if (user && isOnline) {
@@ -375,32 +387,32 @@ export default function App() {
           timestamp: serverTimestamp()
         });
       } catch (e) {
-        console.error("Save error", e);
+        console.error("Gagal menyimpan skor", e);
       }
     }
   };
 
-  // --- RENDER HELPERS ---
+  // --- RENDER: SETUP SCREEN ---
   const renderSetup = () => (
-    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden relative">
+    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden relative animate-in fade-in zoom-in duration-300">
       <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-6 text-white text-center">
         <div className="flex justify-center items-center gap-2 mb-2">
           <Globe size={32} className="text-yellow-300" />
           <Brain size={32} className="text-white" />
         </div>
         <h1 className="text-2xl font-bold">Latihan Soal SD + AI</h1>
-        <p className="opacity-90 text-sm">Powered by Google Gemini</p>
+        <p className="opacity-90 text-sm">Cerdas Bersama Google Gemini</p>
       </div>
 
       <div className="p-6 space-y-6">
         {/* Status Koneksi */}
-        <div className={`flex items-center justify-center gap-2 p-2 rounded-lg text-sm font-bold ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+        <div className={`flex items-center justify-center gap-2 p-2 rounded-lg text-sm font-bold transition-colors ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
           {isOnline ? <Wifi size={16}/> : <WifiOff size={16}/>}
-          {isOnline ? "Terhubung ke Server AI" : "Offline (Generator Lokal)"}
+          {isOnline ? "Mode Online (AI Aktif)" : "Mode Offline (Soal Lokal)"}
         </div>
 
         {/* Form Inputs */}
-        <div className={isGenerating ? "opacity-50 pointer-events-none" : ""}>
+        <div className={`transition-opacity ${isGenerating ? "opacity-50 pointer-events-none" : ""}`}>
           <div className="mb-4">
             <label className="block text-sm font-bold text-gray-700 mb-2">Pilih Kelas</label>
             <div className="grid grid-cols-6 gap-2">
@@ -408,7 +420,7 @@ export default function App() {
                 <button
                   key={g}
                   onClick={() => setGrade(g)}
-                  className={`p-2 rounded-lg font-bold transition-all ${grade === g ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                  className={`p-2 rounded-lg font-bold transition-all transform active:scale-95 ${grade === g ? 'bg-blue-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                 >
                   {g}
                 </button>
@@ -423,7 +435,7 @@ export default function App() {
                 <button
                   key={sub}
                   onClick={() => setSubject(sub)}
-                  className={`p-3 rounded-xl text-xs font-bold border-2 transition-all ${subject === sub ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-gray-100'}`}
+                  className={`p-3 rounded-xl text-xs font-bold border-2 transition-all active:scale-95 ${subject === sub ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-gray-100 hover:bg-gray-200'}`}
                 >
                   {sub}
                 </button>
@@ -446,106 +458,135 @@ export default function App() {
 
         <button 
           onClick={startQuiz}
-          disabled={!isOnline || isGenerating}
-          className={`w-full font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg transition-all ${
-            isOnline && !isGenerating
-            ? 'bg-yellow-400 hover:bg-yellow-500 text-yellow-900 active:scale-95' 
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
+          disabled={isGenerating}
+          className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg transition-all transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
         >
           {isGenerating ? (
             <><Loader2 className="animate-spin" /> Sedang Membuat Soal...</>
           ) : (
-            <><Sparkles size={20} /> Generate Soal AI</>
+            <><Sparkles size={20} /> Mulai Latihan</>
           )}
         </button>
       </div>
     </div>
   );
 
+  // --- RENDER: PLAYING SCREEN ---
   const renderPlaying = () => {
     const q = questions[currentIdx];
     return (
-      <div className="max-w-xl w-full">
+      <div className="max-w-xl w-full animate-in slide-in-from-right duration-300">
         <div className="flex justify-between items-center mb-6 text-white">
-          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2">
+          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2 shadow-sm">
             {subject} • Kelas {grade}
             {usedAI && <Sparkles size={14} className="text-yellow-300" />}
           </div>
-          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold flex items-center gap-2">
+          <div className="bg-white/20 backdrop-blur px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-sm">
             <Star size={18} className="text-yellow-300 fill-current" /> {score}
           </div>
         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl p-8 text-center relative overflow-hidden min-h-[400px] flex flex-col justify-center">
           <span className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">
-            Soal {currentIdx + 1} / {questions.length}
+            Soal {currentIdx + 1} dari {questions.length}
           </span>
-          <h2 className="text-xl md:text-3xl font-bold text-gray-800 mb-8 leading-snug">
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-snug">
             {q.question}
           </h2>
           <div className="grid grid-cols-1 gap-3">
             {q.options.map((opt, idx) => {
-              let btnClass = "bg-gray-50 border-2 border-gray-100 text-gray-700 hover:border-blue-300";
+              let btnClass = "bg-gray-50 border-2 border-gray-100 text-gray-700 hover:border-blue-300 hover:bg-blue-50";
+              
               if (selectedOpt) {
                 if (opt === q.answer) btnClass = "bg-green-100 border-green-500 text-green-800 font-bold";
                 else if (opt === selectedOpt) btnClass = "bg-red-100 border-red-500 text-red-800";
                 else btnClass = "opacity-50 bg-gray-50";
               }
+
               return (
                 <button
                   key={idx} disabled={!!selectedOpt}
                   onClick={() => handleAnswer(opt)}
-                  className={`p-4 rounded-xl text-lg transition-all flex justify-between items-center ${btnClass}`}
+                  className={`p-4 rounded-xl text-lg transition-all flex justify-between items-center ${btnClass} transform active:scale-[0.98]`}
                 >
-                  {opt}
-                  {selectedOpt && opt === q.answer && <CheckCircle size={20} className="text-green-600" />}
-                  {selectedOpt && opt === selectedOpt && opt !== q.answer && <XCircle size={20} className="text-red-500" />}
+                  <span className="text-left">{opt}</span>
+                  {selectedOpt && opt === q.answer && <CheckCircle size={24} className="text-green-600 flex-shrink-0" />}
+                  {selectedOpt && opt === selectedOpt && opt !== q.answer && <XCircle size={24} className="text-red-500 flex-shrink-0" />}
                 </button>
               )
             })}
           </div>
         </div>
         {usedAI && (
-          <div className="text-center mt-4 text-white/70 text-sm flex justify-center items-center gap-1">
-            <Sparkles size={14} /> Soal ini dibuat oleh AI
+          <div className="text-center mt-4 text-white/70 text-xs flex justify-center items-center gap-1">
+            <Sparkles size={12} /> Soal digenerate oleh AI
           </div>
         )}
       </div>
     );
   };
 
+  // --- RENDER: RESULT SCREEN ---
   const renderResult = () => {
     const percentage = Math.round((score / questions.length) * 100);
+    let message = "Belajar Lagi Yuk!";
+    if (percentage === 100) message = "Luar Biasa! Sempurna!";
+    else if (percentage >= 80) message = "Hebat Sekali!";
+    else if (percentage >= 60) message = "Bagus, Tingkatkan!";
+
     return (
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 text-center">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 text-center animate-in zoom-in duration-300">
         <div className="mb-6 flex justify-center">
-          {percentage >= 80 ? <Trophy size={80} className="text-yellow-400"/> : <Leaf size={80} className="text-green-400"/>}
+          {percentage >= 70 ? (
+            <div className="relative">
+              <Trophy size={80} className="text-yellow-400 drop-shadow-lg" fill="currentColor" />
+              <Star size={30} className="text-yellow-200 absolute -top-2 -right-4 animate-bounce" fill="currentColor" />
+            </div>
+          ) : (
+            <Leaf size={80} className="text-green-400" />
+          )}
         </div>
-        <h2 className="text-3xl font-black text-gray-800 mb-2">Selesai!</h2>
-        <p className="text-gray-500 mb-6">Skor akhir kamu:</p>
-        <div className="text-6xl font-black text-blue-600 mb-8">{percentage}</div>
-        <button onClick={() => setView("setup")} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center gap-2">
-          <RefreshCcw /> Main Lagi
+        <h2 className="text-3xl font-black text-gray-800 mb-2">{message}</h2>
+        <p className="text-gray-500 mb-6">Kamu menjawab {score} dari {questions.length} soal dengan benar.</p>
+        
+        <div className="bg-blue-50 rounded-2xl p-4 mb-8">
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Nilai Kamu</div>
+          <div className={`text-6xl font-black ${percentage >= 70 ? 'text-blue-600' : 'text-gray-700'}`}>
+            {percentage}
+          </div>
+        </div>
+
+        <button 
+          onClick={() => setView("setup")} 
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center gap-2 transition-all transform active:scale-95"
+        >
+          <RefreshCcw /> Latihan Lagi
         </button>
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-500 to-blue-600 flex flex-col items-center justify-center p-4 font-sans relative">
+    <div className="min-h-screen bg-gradient-to-br from-cyan-500 to-blue-600 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
+      {/* Background decoration */}
+      <div className="absolute top-0 left-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+      <div className="absolute bottom-0 right-0 w-96 h-96 bg-yellow-400/10 rounded-full blur-3xl translate-x-1/3 translate-y-1/3 pointer-events-none"></div>
+
       {/* Toast Notification */}
       {notification && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
-          <AlertCircle size={20} />
-          <span className="font-bold">{notification}</span>
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
+          <AlertCircle size={20} className="text-yellow-400" />
+          <span className="font-bold text-sm">{notification}</span>
         </div>
       )}
 
       {view === "setup" && renderSetup()}
       {view === "playing" && renderPlaying()}
       {view === "result" && renderResult()}
-      <div className="mt-8 text-white/50 text-xs">Connected App ID: {appId}</div>
+      
+      <div className="mt-8 text-white/50 text-[10px] text-center">
+        App ID: {appId} • React + Firebase + Gemini AI
+      </div>
     </div>
   );
 }

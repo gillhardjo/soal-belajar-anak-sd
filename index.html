@@ -4,7 +4,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { 
   BookOpen, Star, Trophy, CheckCircle, XCircle, 
-  Settings, RefreshCcw, Brain, Leaf, Wifi, WifiOff, Globe
+  Settings, RefreshCcw, Brain, Leaf, Wifi, WifiOff, Globe, AlertCircle
 } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
@@ -195,6 +195,9 @@ export default function App() {
   const [qCount, setQCount] = useState(10);
   const [playerName, setPlayerName] = useState("");
   
+  // Notification State (Pengganti Alert)
+  const [notification, setNotification] = useState(null);
+  
   // Game State
   const [view, setView] = useState("setup");
   const [questions, setQuestions] = useState([]);
@@ -224,14 +227,20 @@ export default function App() {
     setSubject(SUBJECTS[grade][0]);
   }, [grade]);
 
+  // Helper Notifikasi
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   // --- START QUIZ LOGIC ---
   const startQuiz = () => {
     if (!isOnline) {
-      alert("Aplikasi ini membutuhkan koneksi internet untuk menghasilkan soal terbaru!");
+      showNotification("Butuh internet untuk buat soal baru!");
       return;
     }
     if (!playerName.trim()) {
-      alert("Masukkan namamu dulu ya!");
+      showNotification("Jangan lupa isi namamu dulu ya!");
       return;
     }
 
@@ -309,7 +318,7 @@ export default function App() {
 
   // --- RENDER HELPERS ---
   const renderSetup = () => (
-    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden">
+    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden relative">
       <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-6 text-white text-center">
         <div className="flex justify-center items-center gap-2 mb-2">
           <Globe size={32} className="text-yellow-300" />
@@ -458,7 +467,15 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-500 to-blue-600 flex flex-col items-center justify-center p-4 font-sans">
+    <div className="min-h-screen bg-gradient-to-br from-cyan-500 to-blue-600 flex flex-col items-center justify-center p-4 font-sans relative">
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
+          <AlertCircle size={20} />
+          <span className="font-bold">{notification}</span>
+        </div>
+      )}
+
       {view === "setup" && renderSetup()}
       {view === "playing" && renderPlaying()}
       {view === "result" && renderResult()}
